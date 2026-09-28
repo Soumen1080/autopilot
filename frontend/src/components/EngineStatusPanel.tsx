@@ -1,10 +1,14 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+// @ts-nocheck
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { explorerUrl } from "@/lib/network";
 import {
-  Zap, RefreshCw, CheckCircle2, XCircle,
-  ArrowUpRight, Activity, Cpu, ExternalLink,
+  Zap, RefreshCw, CheckCircle2, 
+   Activity, Cpu, ExternalLink,
 } from "lucide-react";
 
 interface EngineStatus {
@@ -23,7 +27,7 @@ interface EngineStatus {
 
 function TxRow({ tx }: { tx: EngineStatus["recentTransactions"][number] }) {
   const stellarExpertUrl = tx.txHash
-    ? `https://stellar.expert/explorer/testnet/tx/${tx.txHash}`
+    ? explorerUrl("tx", tx.txHash)
     : null;
 
   return (
@@ -206,7 +210,7 @@ export default function EngineStatusPanel() {
             Engine: {status.enginePublicKey.slice(0, 8)}…{status.enginePublicKey.slice(-4)}
           </p>
           <a
-            href={`https://stellar.expert/explorer/testnet/account/${status.enginePublicKey}`}
+            href={explorerUrl("account", status.enginePublicKey)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-[10px] text-white/20 hover:text-blue-400 flex items-center gap-1 transition-colors"

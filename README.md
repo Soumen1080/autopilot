@@ -427,3 +427,35 @@ Thanks to everyone who has contributed to AutoPilot! 🌟
     <img src="https://img.shields.io/github/stars/thisisouvik/autopilot?style=social" alt="Star on GitHub" />
   </a>
 </div>
+
+
+## Architecture
+
+AutoPilot uses a dual-path streaming architecture to guarantee real-time financial automation without sacrificing reliability.
+
+\\\mermaid
+flowchart TD
+    User([User / Freighter Wallet]) -->|Signs Txs| Frontend[Next.js App]
+    Frontend -->|REST API| Backend[Express Backend]
+    Backend -->|Postgres| DB[(Neon Postgres)]
+    
+    subgraph Engine
+    Horizon[Stellar Horizon] -->|SSE Stream| StreamWorker[HorizonStream]
+    StreamWorker -->|1. Direct Path| Processor[Rule Processor]
+    StreamWorker -->|2. Fallback Path| Redis[(Redis / BullMQ)]
+    Redis -->|Queue| Processor
+    end
+    
+    Processor -->|RPC / Submit Tx| Soroban[Soroban AutopilotVault]
+    Soroban -->|Escrow/Limit check| Stellar[Stellar Network]
+\\\
+
+*For a detailed breakdown, please refer to the [Architecture Documentation](docs/ARCHITECTURE.md).*
+
+## Documentation
+
+- [Local Development Setup](docs/LOCAL_SETUP.md)
+- [REST API Reference](docs/API.md)
+- [Supported Rule Patterns](docs/RULES.md)
+- [Architecture Deep-Dive](docs/ARCHITECTURE.md)
+

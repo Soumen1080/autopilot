@@ -12,6 +12,7 @@ datasource db {
 model User {
   id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   publicKey             String                 @unique
+  lastSeen              DateTime               @default(now())
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   rules                 Rule[]
@@ -42,7 +43,7 @@ model AutomatedTransaction {
   amount    Float
   type      String
   memo      String?
-  txHash    String?
+  txHash    String?  @unique
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
   rule      Rule?    @relation(fields: [ruleId], references: [id])
