@@ -112,6 +112,9 @@ jobs:
         run: cargo test
         working-directory: contracts
 
+      - name: Install stellar-cli
+        run: cargo install --locked stellar-cli
+
       - name: Build contract (WASM)
-        run: cargo build --target wasm32v1-none --release
+        run: stellar contract build
         working-directory: contracts

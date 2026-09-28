@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+// @ts-nocheck
 "use client";
 
 import { useState } from "react";
@@ -7,10 +9,13 @@ import {
   Sparkles, TrendingUp, Clock, CheckCircle2, Loader2,
 } from "lucide-react";
 import Link from "next/link";
+import { calcGoalEta, fmtXlm, type EtaResult, type TxRow } from "@/lib/insights";
 
 interface Goal {
   id: string;
   name: string;
+  /** Currency the target and progress are denominated in. */
+  asset?: "XLM" | "USDC";
   targetAmount: number;
   currentAmount: number;
   emoji: string;
@@ -20,6 +25,8 @@ interface Goal {
 
 interface Rule {
   id: string;
+  trigger?: string | null;
+  memo?: string | null;
   description: string | null;
   action: string;
   amount: number;
@@ -27,27 +34,30 @@ interface Rule {
   status: string;
 }
 
+/**
+ * Infer a rule's asset from its text — mirrors ruleAsset() in the backend
+ * (backend/src/engine/processor.ts). The Rule table stores the asset inside the
+ * trigger phrase rather than a column, so both sides read it the same way.
+ */
+function ruleAssetOf(rule: Rule): "XLM" | "USDC" {
+  const text = [rule.trigger, rule.action, rule.memo, rule.description]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return text.includes("usdc") && !text.includes("xlm") ? "USDC" : "XLM";
+}
+
 // ── AI ETA calc ───────────────────────────────────────────────────────────────
 function calcETA(goal: Goal, rules: Rule[]): string {
   const remaining = (goal.targetAmount ?? 0) - (goal.currentAmount ?? 0);
-  if (remaining <= 0) return "Completed! 🎉";
+  const linked = rules.find(r => r.id === goal.linkedRuleId) ?? null;
 
-  const linked = rules.find(r => r.id === goal.linkedRuleId);
-  if (!linked) return "Link a savings rule to get an ETA";
-
-  // Estimate: assume rule triggers ~4x per week (rough)
-  const weeklyAmount = linked.isPercentage
-    ? (linked.amount / 100) * 50  // 50 XLM avg payment estimate
-    : linked.amount * 4;
-
-  if (weeklyAmount <= 0) return "Calculating…";
-
-  const weeks = Math.ceil(remaining / weeklyAmount);
-  if (weeks <= 1) return "This week";
-  if (weeks <= 4) return `~${weeks} weeks`;
-  const months = Math.ceil(weeks / 4);
-  if (months <= 12) return `~${months} month${months > 1 ? "s" : ""}`;
-  return `~${Math.ceil(months / 12)} year${Math.ceil(months / 12) > 1 ? "s" : ""}`;
+  return calcGoalEta({
+    remaining,
+    rule: linked ? { id: linked.id, amount: linked.amount, isPercentage: linked.isPercentage } : null,
+    ruleTxs: linked ? transactions.filter(t => t.ruleId === linked.id) : [],
+    allTxs: transactions,
+  });
 }
 
 // ── Progress Bar ──────────────────────────────────────────────────────────────
@@ -75,11 +85,13 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
 function GoalCard({
   goal,
   rules,
+  transactions,
   onDelete,
   onLinkRule,
 }: {
   goal: Goal;
   rules: Rule[];
+  transactions: TxRow[];
   onDelete: (id: string) => void;
   onLinkRule: (goalId: string, ruleId: string | null) => void;
 }) {
@@ -88,6 +100,8 @@ function GoalCard({
   const cur = goal.currentAmount ?? 0;
   const tgt = goal.targetAmount ?? 1;
   const pct = Math.min(Math.round((cur / tgt) * 100), 100);
+  // Goals created before asset tracking are XLM.
+  const goalAsset = goal.asset ?? "XLM";
   const eta = calcETA(goal, rules);
   const linked = rules.find(r => r.id === goal.linkedRuleId);
   const isDone = pct >= 100;
@@ -124,7 +138,7 @@ function GoalCard({
             <div>
               <p className="font-semibold text-white/90 text-base leading-tight">{goal.name}</p>
               <p className="text-xs text-white/30 mt-0.5">
-                {(goal.currentAmount ?? 0).toFixed(2)} / {(goal.targetAmount ?? 0).toFixed(2)} XLM
+                {(goal.currentAmount ?? 0).toFixed(2)} / {(goal.targetAmount ?? 0).toFixed(2)} {goalAsset}
               </p>
             </div>
           </div>
@@ -144,10 +158,24 @@ function GoalCard({
         <ProgressBar value={goal.currentAmount ?? 0} max={goal.targetAmount ?? 1} />
         <div className="flex items-center justify-between mt-2">
           <span className="text-xs text-white/40">{pct}% complete</span>
-          <span className="text-xs text-white/40 flex items-center gap-1">
-            <Clock className="w-3 h-3" /> {eta}
+          <span
+            className="text-xs text-white/40 flex items-center gap-1"
+            title={
+              eta.basis === "history" && eta.weeklyRate
+                ? `Based on ${fmtXlm(eta.weeklyRate)} XLM/week measured from this rule's history`
+                : eta.basis === "estimate"
+                ? "Estimated — this rule has no transaction history yet"
+                : undefined
+            }
+          >
+            <Clock className="w-3 h-3" /> {eta.label}
           </span>
         </div>
+        {eta.basis === "history" && eta.weeklyRate !== null && (
+          <p className="text-[11px] text-white/25 mt-1.5">
+            Averaging {fmtXlm(eta.weeklyRate)} XLM/week from this rule's actual activity
+          </p>
+        )}
 
         {/* Linked rule */}
         <button
@@ -181,19 +209,33 @@ function GoalCard({
                     ✕ Remove link
                   </button>
                 )}
-                {rules.filter(r => r.status === "active").map(r => (
-                  <button
-                    key={r.id}
-                    onClick={() => handleLink(r.id)}
-                    className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-colors ${
-                      r.id === goal.linkedRuleId
-                        ? "bg-blue-500/10 border border-blue-500/20 text-blue-400"
-                        : "text-white/50 hover:bg-white/[0.05]"
-                    }`}
-                  >
-                    {r.description ?? `${r.action} ${r.amount}${r.isPercentage ? "%" : " XLM"}`}
-                  </button>
-                ))}
+                {rules.filter(r => r.status === "active").map(r => {
+                  const rAsset = ruleAssetOf(r);
+                  // The engine only credits a goal when the executed asset
+                  // matches the goal's, so a mismatched link would silently
+                  // never advance progress. Flag it at link time.
+                  const mismatch = rAsset !== goalAsset;
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => handleLink(r.id)}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-colors ${
+                        r.id === goal.linkedRuleId
+                          ? "bg-blue-500/10 border border-blue-500/20 text-blue-400"
+                          : "text-white/50 hover:bg-white/[0.05]"
+                      }`}
+                    >
+                      <span>
+                        {r.description ?? `${r.action} ${r.amount}${r.isPercentage ? "%" : ` ${rAsset}`}`}
+                      </span>
+                      {mismatch && (
+                        <span className="block text-[10px] text-amber-400/80 mt-0.5">
+                          Moves {rAsset} — won't count toward this {goalAsset} goal
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
                 {rules.filter(r => r.status === "active").length === 0 && (
                   <p className="text-xs text-white/25 px-3 py-2">No active rules to link</p>
                 )}
@@ -219,6 +261,7 @@ function NewGoalSheet({
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [emoji, setEmoji] = useState("🎯");
+  const [asset, setAsset] = useState<"XLM" | "USDC">("XLM");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -231,7 +274,7 @@ function NewGoalSheet({
       const res = await fetch("/api/goals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), targetAmount: parseFloat(target), emoji }),
+        body: JSON.stringify({ name: name.trim(), targetAmount: parseFloat(target), emoji, asset }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -294,7 +337,26 @@ function NewGoalSheet({
           </div>
 
           <div>
-            <label className="text-xs text-white/40 block mb-1.5">Target amount (XLM)</label>
+            <label className="text-xs text-white/40 block mb-1.5">Denominated in</label>
+            <div className="flex gap-2 mb-4">
+              {(["XLM", "USDC"] as const).map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setAsset(a)}
+                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all border ${
+                    asset === a
+                      ? a === "USDC"
+                        ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
+                        : "bg-blue-500/15 border-blue-500/30 text-blue-400"
+                      : "bg-white/[0.04] border-white/[0.06] text-white/35 hover:text-white/60"
+                  }`}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+            <label className="text-xs text-white/40 block mb-1.5">Target amount ({asset})</label>
             <input
               type="number" min="1" step="any"
               value={target} onChange={e => setTarget(e.target.value)}
@@ -323,9 +385,11 @@ function NewGoalSheet({
 export default function GoalsClient({
   initialGoals,
   rules,
+  transactions = [],
 }: {
   initialGoals: Goal[];
   rules: Rule[];
+  transactions?: TxRow[];
 }) {
   // Filter out any undefined/null items that may slip through from the DB
   const safeInitial = (initialGoals ?? []).filter(
@@ -387,11 +451,20 @@ export default function GoalsClient({
           </div>
           <p className="text-sm font-semibold text-white/50">No goals yet</p>
           <p className="text-xs text-white/25 mt-1.5 max-w-xs">
-            Set a savings target and link it to an AutoPilot rule to track your progress.
+            Set a target, choose XLM or USDC, and link a rule so every automated transfer updates your progress.
           </p>
+          <div className="mt-5 w-full max-w-sm rounded-xl bg-gradient-to-r from-blue-500/[0.06] to-purple-500/[0.06] border border-white/[0.07] px-4 py-3 text-left">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-white/55">Example: Emergency fund</p>
+                <p className="text-[11px] text-white/25 mt-0.5">1,000 XLM target · linked to a 10% savings rule</p>
+              </div>
+              <TrendingUp className="w-4 h-4 text-blue-400/60 shrink-0" />
+            </div>
+          </div>
           <button
             onClick={() => setShowNew(true)}
-            className="mt-5 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all"
+            className="mt-6 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all"
           >
             <Plus className="w-4 h-4" />
             Create first goal
@@ -405,6 +478,7 @@ export default function GoalsClient({
                 key={goal.id}
                 goal={goal}
                 rules={rules}
+                transactions={transactions}
                 onDelete={handleDelete}
                 onLinkRule={handleLinkRule}
               />

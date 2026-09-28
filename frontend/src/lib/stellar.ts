@@ -1,3 +1,5 @@
+import { horizonAccountUrl } from "./network";
+
 export interface StellarBalance {
   xlm: string;
   otherAssets: Array<{ asset: string; balance: string }>;
@@ -6,16 +8,16 @@ export interface StellarBalance {
 
 export async function fetchStellarBalance(publicKey: string): Promise<StellarBalance> {
   try {
-    const res = await fetch(
-      `https://horizon-testnet.stellar.org/accounts/${publicKey}`,
-      { next: { revalidate: 30 } }
-    );
+    const res = await fetch(horizonAccountUrl(publicKey), {
+      next: { revalidate: 30 },
+    });
 
     if (!res.ok) {
       return { xlm: "0.0000000", otherAssets: [], isUnfunded: true };
     }
 
     const data = await res.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const balances: any[] = data.balances ?? [];
 
     const xlmBalance = balances.find((b) => b.asset_type === "native");
