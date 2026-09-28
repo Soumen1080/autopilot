@@ -13,6 +13,8 @@ import { sendXLM } from "../stellar/transaction";
 export { fetchRecentPayments } from "../stellar/horizon";
 export { loadKeypairFromBlob } from "../stellar/keypair";
 
+type SqlClient = (strings: TemplateStringsArray, ...values: any[]) => Promise<any[]>;
+
 /** Engine server keypair — signs all automated transactions */
 export function getEngineKeypair(): typeof Keypair.prototype {
   const secret = process.env.AUTOPILOT_SECRET_KEY;
@@ -33,15 +35,17 @@ export async function executeRuleTransaction(
   return sendXLM(engine, destinationId, amountXLM, memoText);
 }
 
-/** Check if a Horizon payment ID has already been processed (deduplication) */
-export async function isPaymentAlreadyProcessed(
+/** Atomically claim a Horizon payment so only one worker can process it. */
+export async function claimPayment(
   paymentHorizonId: string,
-  sql: (strings: TemplateStringsArray, ...values: any[]) => Promise<any[]>
+  userId: string,
+  sql: SqlClient
 ): Promise<boolean> {
   const rows = await sql`
-    SELECT 1 FROM "AutomatedTransaction"
-    WHERE "txHash" = ${paymentHorizonId}
-    LIMIT 1
+    INSERT INTO "ProcessedPayment" ("paymentId", "userId", "createdAt")
+    VALUES (${paymentHorizonId}, ${userId}::uuid, NOW())
+    ON CONFLICT ("paymentId") DO NOTHING
+    RETURNING "paymentId"
   `;
   return rows.length > 0;
 }

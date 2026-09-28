@@ -48,7 +48,26 @@ async function migrate() {
   await sql`
     CREATE INDEX IF NOT EXISTS "atx_created_idx" ON "AutomatedTransaction" ("createdAt" DESC)
   `;
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "atx_tx_hash_unique"
+    ON "AutomatedTransaction" ("txHash")
+  `;
   console.log("   ✅ AutomatedTransaction table ready\n");
+
+  // ── 2b. Atomically claim incoming Horizon payments ───────────────────
+  console.log("2b. Creating ProcessedPayment deduplication table...");
+  await sql`
+    CREATE TABLE IF NOT EXISTS "ProcessedPayment" (
+      "paymentId" TEXT PRIMARY KEY,
+      "userId" UUID NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS "processed_payment_user_idx"
+    ON "ProcessedPayment" ("userId")
+  `;
+  console.log("   ✅ ProcessedPayment table ready\n");
 
   // ── 3. Ensure Goal table has all required columns ─────────────────────
   console.log("3. Ensuring Goal table has savedAmount column...");

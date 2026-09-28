@@ -16,7 +16,7 @@
 
 import { Worker, Job } from "bullmq";
 import { getDb } from "../lib/db";
-import { executeRuleTransaction } from "../lib/engine";
+import { claimPayment, executeRuleTransaction } from "../lib/engine";
 import { doesPaymentMatchTrigger } from "../lib/paymentTrigger";
 import { checkSpendingLimit, recordSpend } from "./limitGuard";
 import { PAYMENT_QUEUE_NAME, PaymentJobData, CronJobData, CRON_QUEUE_NAME, getConnectionOptions } from "./queue";
@@ -31,18 +31,7 @@ export async function processPaymentDirect(data: PaymentJobData): Promise<any> {
 
   console.log(`[Processor] ⚡ Processing ${amount} ${asset} for ${publicKey.slice(0, 8)}…`);
 
-  // ── Step 1: Deduplicate
-  const existing = await sql`
-    SELECT 1 FROM "AutomatedTransaction"
-    WHERE "txHash" = ${paymentHorizonId}
-    LIMIT 1
-  `;
-  if (existing.length > 0) {
-    console.log(`[Processor] ⏭ Already processed ${paymentHorizonId.slice(0, 16)}… — skipping`);
-    return { skipped: true, reason: "duplicate" };
-  }
-
-  // ── Step 2: Fetch user + active rules
+  // ── Step 1: Fetch user + active rules
   const [userRows, rules] = await Promise.all([
     sql`SELECT id, "dailyLimit", "weeklyLimit" FROM "User" WHERE id = ${userId}::uuid LIMIT 1`,
     sql`
@@ -74,6 +63,7 @@ export async function processPaymentDirect(data: PaymentJobData): Promise<any> {
   const investVault  = vaults.find((v: any) => v.type === "investment");
 
   const results: any[] = [];
+  let paymentClaimed = false;
 
   // ── Step 4: Match + execute each rule
   for (const rule of rules) {
@@ -121,6 +111,15 @@ export async function processPaymentDirect(data: PaymentJobData): Promise<any> {
       console.warn(`[Processor] ⚠ No ${action} vault found — user must create one in the Vault tab`);
       results.push({ ruleId: rule.id, status: "failed", error: "No vault found — create one in the Vault tab" });
       continue;
+    }
+
+    if (!paymentClaimed) {
+      // The unique paymentId constraint makes this claim atomic across workers.
+      paymentClaimed = await claimPayment(paymentHorizonId, userId, sql);
+      if (!paymentClaimed) {
+        console.log(`[Processor] ⏭ Already processed ${paymentHorizonId.slice(0, 16)}… — skipping`);
+        return { skipped: true, reason: "duplicate" };
+      }
     }
 
     const memo = (rule.memo as string | null) ?? `AutoPilot:${action}`.slice(0, 28);
