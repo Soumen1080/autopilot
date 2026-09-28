@@ -218,17 +218,24 @@ function LimitRow({
   const [editing, setEditing] = useState(false);
   const [input, setInput] = useState(value !== null ? String(value) : "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSave = async () => {
     setSaving(true);
-    const parsed = input.trim() === "" ? null : parseFloat(input);
-    await onSave(isNaN(parsed as number) ? null : parsed);
-    setSaving(false);
-    setEditing(false);
+    setError("");
+    try {
+      const parsed = input.trim() === "" ? null : parseFloat(input);
+      await onSave(isNaN(parsed as number) ? null : parsed);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save limit. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="flex items-center gap-4 px-6 py-4 border-b border-white/[0.04] last:border-0">
+    <div className="relative flex items-center gap-4 px-6 py-4 border-b border-white/[0.04] last:border-0">
       <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center shrink-0">
         <Icon className="w-3.5 h-3.5 text-white/35" />
       </div>
@@ -287,6 +294,7 @@ function LimitRow({
           </motion.button>
         )}
       </AnimatePresence>
+      {error && <p className="absolute mt-1 text-xs text-red-400">{error}</p>}
     </div>
   );
 }
@@ -299,11 +307,12 @@ function SpendingLimits({
   onUpdate: (key: "dailyLimit" | "weeklyLimit", val: number | null) => void;
 }) {
   const save = async (key: "dailyLimit" | "weeklyLimit", val: number | null) => {
-    await fetch("/api/account", {
+    const res = await fetch("/api/account", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [key]: val }),
     });
+    if (!res.ok) throw new Error("Failed to save limit. Please try again.");
     onUpdate(key, val);
   };
 
@@ -503,11 +512,20 @@ function DangerZone() {
   const router = useRouter();
   const [showConfirm, setShowConfirm] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [error, setError] = useState("");
 
   const handleDisconnect = async () => {
     setDisconnecting(true);
-    await fetch("/api/account/disconnect", { method: "POST" });
-    router.push("/onboarding");
+    setError("");
+    try {
+      const res = await fetch("/api/account/disconnect", { method: "POST" });
+      if (!res.ok) throw new Error("Failed to disconnect wallet. Please try again.");
+      router.push("/onboarding");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to disconnect wallet. Please try again.");
+    } finally {
+      setDisconnecting(false);
+    }
   };
 
   return (
@@ -561,6 +579,7 @@ function DangerZone() {
               </motion.div>
             )}
           </AnimatePresence>
+          {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
         </div>
       </div>
     </div>

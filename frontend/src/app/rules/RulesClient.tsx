@@ -51,12 +51,21 @@ function RuleSheet({
   onDelete: (id: string) => void;
 }) {
   const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState("");
 
   const handleDelete = async () => {
     setDeleting(true);
-    await fetch(`/api/rules/${rule.id}`, { method: "DELETE" });
-    onDelete(rule.id);
-    onClose();
+    setError("");
+    try {
+      const res = await fetch(`/api/rules/${rule.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete rule. Please try again.");
+      onDelete(rule.id);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete rule. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const accentMap: Record<string, string> = {
@@ -137,6 +146,7 @@ function RuleSheet({
             <Trash2 className="w-4 h-4" />
             {deleting ? "Deleting…" : "Delete rule"}
           </button>
+          {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
       </motion.div>
     </AnimatePresence>
