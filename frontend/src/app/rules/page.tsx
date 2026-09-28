@@ -12,6 +12,7 @@ export default async function RulesPage() {
     JOIN "User" u ON r."userId" = u.id
     WHERE u."publicKey" = ${session.publicKey}
     ORDER BY r."createdAt" DESC
+    LIMIT 20
   `.catch(() => []);
 
   return (
