@@ -207,6 +207,13 @@ export default async function vaultRoutes(server: FastifyInstance) {
 
   server.delete("/:type", async (request, reply) => {
     const { type } = request.params as { type: string };
+
+    if (!VALID_TYPES.includes(type as VaultType)) {
+      return reply.status(400).send({
+        error: `Invalid vault type. Must be one of: ${VALID_TYPES.join(", ")}`,
+      });
+    }
+
     const sql = getDb();
 
     const vaults = await sql`
