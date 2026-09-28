@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { verifyAuth } from "../middleware/auth";
 import { getDb } from "../lib/db";
 import { fetchRecentPayments, executeRuleTransaction, isPaymentAlreadyProcessed } from "../lib/engine";
+import { doesPaymentMatchTrigger } from "../lib/paymentTrigger";
 import { getHorizon } from "../stellar/horizon";
 
 export default async function autopilotRoutes(server: FastifyInstance) {
@@ -197,16 +198,5 @@ function doesPaymentMatchRule(
   payment: { amount: string; asset: string; from: string },
   rule: { trigger: string; action: string }
 ): boolean {
-  const trigger = rule.trigger.toLowerCase();
-  const isXLM = payment.asset === "XLM";
-
-  if (
-    trigger.includes("every payment") ||
-    trigger.includes("payment received") ||
-    trigger.includes("receive") ||
-    trigger.includes("incoming")
-  ) {
-    return isXLM;
-  }
-  return false;
+  return doesPaymentMatchTrigger(rule.trigger, payment.asset);
 }

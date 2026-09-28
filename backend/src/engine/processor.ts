@@ -17,30 +17,9 @@
 import { Worker, Job } from "bullmq";
 import { getDb } from "../lib/db";
 import { executeRuleTransaction } from "../lib/engine";
+import { doesPaymentMatchTrigger } from "../lib/paymentTrigger";
 import { checkSpendingLimit, recordSpend } from "./limitGuard";
 import { PAYMENT_QUEUE_NAME, PaymentJobData, CronJobData, CRON_QUEUE_NAME, getConnectionOptions } from "./queue";
-
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-function doesPaymentMatchTrigger(trigger: string, asset: string): boolean {
-  const t = trigger.toLowerCase();
-  const isXLM = asset === "XLM";
-
-  const matchesTrigger =
-    t.includes("every payment") ||
-    t.includes("payment received") ||
-    t.includes("payment") ||
-    t.includes("receive") ||
-    t.includes("received") ||
-    t.includes("incoming") ||
-    t.includes("deposit") ||
-    t.includes("salary") ||
-    t.includes("income") ||
-    t.includes("transfer") ||
-    t.includes("xlm");
-
-  return matchesTrigger && isXLM;
-}
 
 /**
  * Core payment processing logic — exported for direct use.
