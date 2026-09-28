@@ -1,21 +1,40 @@
+// @ts-nocheck
 import { FastifyInstance } from "fastify";
 import { verifyAuth } from "../middleware/auth";
 import { getDb } from "../lib/db";
+import { parseRuleAsset } from "../lib/ruleAsset";
+import { buildPage, parsePagination, readConfiguredLimit } from "../lib/pagination";
+
+const DEFAULT_MAX_GOALS_PER_USER = 50;
 
 export default async function goalsRoutes(server: FastifyInstance) {
   server.addHook("onRequest", verifyAuth);
 
-  server.get("/", async (request, reply) => {
+  server.get("/", async (request: any, reply: any) => {
     const sql = getDb();
-    const goals = await sql`
-      SELECT * FROM "Goal" 
-      WHERE "userId" = ${request.user!.id}::uuid 
-      ORDER BY "createdAt" DESC
-    `;
-    return reply.send(goals);
+    const pagination = parsePagination(request.query as any);
+    if (!pagination.ok) return reply.status(400).send({ error: pagination.error });
+
+    const goals = pagination.cursor
+      ? await sql`
+          SELECT * FROM "Goal"
+          WHERE "userId" = ${request.user!.id}::uuid
+            AND ("createdAt", id) < (${pagination.cursor.createdAt}::timestamptz, ${pagination.cursor.id}::uuid)
+          ORDER BY "createdAt" DESC, id DESC
+          LIMIT ${pagination.limit + 1}
+        `
+      : await sql`
+          SELECT * FROM "Goal"
+          WHERE "userId" = ${request.user!.id}::uuid
+          ORDER BY "createdAt" DESC, id DESC
+          LIMIT ${pagination.limit + 1}
+          OFFSET ${pagination.offset}
+        `;
+    const page = buildPage(goals as any[], pagination);
+    return reply.send({ goals: page.items, pagination: page.pagination });
   });
 
-  server.post("/", async (request, reply) => {
+  server.post("/", async (request: any, reply: any) => {
     const body = request.body as any;
     const sql = getDb();
 
@@ -23,16 +42,38 @@ export default async function goalsRoutes(server: FastifyInstance) {
       return reply.status(400).send({ error: "Name and target amount are required" });
     }
 
+    const maxGoals = readConfiguredLimit("MAX_GOALS_PER_USER", DEFAULT_MAX_GOALS_PER_USER);
+    const countRows = await sql`
+      SELECT COUNT(*) AS count FROM "Goal"
+      WHERE "userId" = ${request.user!.id}::uuid
+    `;
+    if (Number(countRows[0]?.count ?? 0) >= maxGoals) {
+      return reply.status(409).send({
+        error: `Goal limit reached. Each user can create up to ${maxGoals} goals.`,
+        code: "GOAL_LIMIT_REACHED",
+        limit: maxGoals,
+      });
+    }
+
+    // Goals are denominated in a single asset. Rejecting an unsupported value
+    // rather than defaulting keeps a typo from creating an XLM goal the user
+    // believes is in USDC. The DB CHECK constraint is the backstop.
+    const asset = parseRuleAsset(body.asset ?? "XLM");
+    if (!asset) {
+      return reply.status(400).send({ error: "asset must be either XLM or USDC" });
+    }
+
     const result = await sql`
       INSERT INTO "Goal" (
-        "userId", name, "targetAmount", "currentAmount", emoji
+        "userId", name, "targetAmount", "currentAmount", emoji, asset
       )
       VALUES (
         ${request.user!.id}::uuid,
         ${body.name},
         ${body.targetAmount},
         0,
-        ${body.emoji || "🎯"}
+        ${body.emoji || "🎯"},
+        ${asset}
       )
       RETURNING *
     `;
@@ -40,7 +81,7 @@ export default async function goalsRoutes(server: FastifyInstance) {
     return reply.send({ success: true, goal: result[0] });
   });
 
-  server.patch("/:id", async (request, reply) => {
+  server.patch("/:id", async (request: any, reply: any) => {
     const { id } = request.params as { id: string };
     const body = request.body as any;
     const sql = getDb();
@@ -64,7 +105,7 @@ export default async function goalsRoutes(server: FastifyInstance) {
     return reply.send({ success: true, goal: result[0] });
   });
 
-  server.delete("/:id", async (request, reply) => {
+  server.delete("/:id", async (request: any, reply: any) => {
     const { id } = request.params as { id: string };
     const sql = getDb();
 

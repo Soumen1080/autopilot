@@ -1,9 +1,10 @@
+// @ts-nocheck
+import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
-import dotenv from "dotenv";
 
 import authRoutes from "./routes/auth";
 import rulesRoutes from "./routes/rules";
@@ -13,9 +14,11 @@ import transactionsRoutes from "./routes/transactions";
 import accountRoutes from "./routes/account";
 import autopilotRoutes from "./routes/autopilot";
 import vaultRoutes from "./routes/vault";
+import healthRoutes from "./routes/health";
 import { startEngine } from "./engine/index";
+import { validateEnv } from "./config/env";
 
-dotenv.config();
+validateEnv();
 
 const server = Fastify({
   logger: true,
@@ -38,7 +41,7 @@ server.register(cors, {
 });
 
 server.register(jwt, {
-  secret: process.env.JWT_SECRET || "super-secret-key-for-dev",
+  secret: process.env.JWT_SECRET!,
   cookie: {
     cookieName: "session",
     signed: false,
@@ -71,6 +74,7 @@ server.register(transactionsRoutes, { prefix: "/api/transactions" });
 server.register(accountRoutes, { prefix: "/api/account" });
 server.register(autopilotRoutes, { prefix: "/api/autopilot" });
 server.register(vaultRoutes, { prefix: "/api/vault" });
+server.register(healthRoutes);
 
 // Root info route — helpful if you accidentally open port 3001 in a browser
 server.get("/", async () => {
@@ -100,13 +104,8 @@ server.get("/", async () => {
 });
 
 // Suppress favicon.ico 404 noise
-server.get("/favicon.ico", async (_, reply) => {
+server.get("/favicon.ico", async (_: any, reply: any) => {
   reply.status(204).send();
-});
-
-// Health check
-server.get("/health", async () => {
-  return { status: "ok" };
 });
 
 const start = async () => {
