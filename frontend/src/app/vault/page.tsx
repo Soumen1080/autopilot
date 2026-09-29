@@ -15,6 +15,10 @@ import {
   CheckCircle2,
   X,
   ChevronRight,
+  ChevronLeft,
+  Copy,
+  Check,
+  ArrowRight,
 } from "lucide-react";
 import DashboardShell from "@/components/DashboardShell";
 
@@ -69,37 +73,80 @@ const VAULT_META = {
 function WithdrawModal({
   vaultType,
   balance,
+  userPublicKey,
   onClose,
   onSuccess,
 }: {
   vaultType: "savings" | "investment";
   balance: VaultBalance | null;
+  userPublicKey?: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const [step, setStep] = useState<"input" | "confirm">("input");
   const [asset, setAsset] = useState<"xlm" | "usdc">("xlm");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [destKey, setDestKey] = useState(userPublicKey || "");
+  const [copied, setCopied] = useState(false);
 
-  const handleWithdraw = async () => {
-    if (!amount || isNaN(parseFloat(amount))) {
-      setError("Enter a valid amount");
-      return;
+  useEffect(() => {
+    if (userPublicKey) {
+      setDestKey(userPublicKey);
+    } else {
+      fetch("/api/auth/me", { credentials: "include" })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.user?.publicKey) setDestKey(d.user.publicKey);
+        })
+        .catch(() => {});
     }
-    
-    // Check reserve limit for XLM
+  }, [userPublicKey]);
+
+  const copyDestKey = async () => {
+    if (!destKey) return;
+    await navigator.clipboard.writeText(destKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const validateAmount = (): number | null => {
+    const parsed = parseFloat(amount);
+    if (!amount || isNaN(parsed) || parsed <= 0) {
+      setError("Enter a valid amount greater than 0");
+      return null;
+    }
+
     if (asset === "xlm" && balance) {
       const maxWithdrawable = Math.max(0, balance.xlm - 2.5);
-      if (parseFloat(amount) > maxWithdrawable) {
+      if (parsed > maxWithdrawable) {
         setError(`Insufficient funds. Minimum 2.5 XLM reserve required. Max: ${maxWithdrawable.toFixed(2)}`);
-        return;
+        return null;
       }
     } else if (asset === "usdc" && balance) {
-      if (parseFloat(amount) > balance.usdc) {
+      if (parsed > balance.usdc) {
         setError(`Insufficient USDC. Max: ${balance.usdc.toFixed(2)}`);
-        return;
+        return null;
       }
+    }
+
+    return parsed;
+  };
+
+  const handleProceedToConfirm = () => {
+    const valid = validateAmount();
+    if (valid !== null) {
+      setError("");
+      setStep("confirm");
+    }
+  };
+
+  const handleWithdraw = async () => {
+    const valid = validateAmount();
+    if (valid === null) {
+      setStep("input");
+      return;
     }
 
     setLoading(true);
@@ -112,11 +159,11 @@ function WithdrawModal({
         body: JSON.stringify({ asset, amount }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || "Withdrawal failed");
       onSuccess();
       onClose();
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || "Failed to process withdrawal");
     } finally {
       setLoading(false);
     }
@@ -128,85 +175,201 @@ function WithdrawModal({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+      onClick={() => !loading && onClose()}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 10 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-[#0d0d0d] border border-white/[0.08] rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+        className="bg-[#0d0d0d] border border-white/[0.08] rounded-2xl p-6 w-full max-w-sm shadow-2xl relative"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-base font-semibold text-white">
-            Withdraw from {VAULT_META[vaultType].label}
-          </h3>
-          <button onClick={onClose} className="text-white/30 hover:text-white/60 transition-colors">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            {step === "confirm" && (
+              <button
+                type="button"
+                onClick={() => setStep("input")}
+                disabled={loading}
+                className="p-1 -ml-1 text-white/40 hover:text-white transition-colors rounded-lg disabled:opacity-50"
+                title="Back to edit"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
+            <h3 className="text-base font-semibold text-white">
+              {step === "confirm" ? "Confirm Withdrawal" : `Withdraw from ${VAULT_META[vaultType].label}`}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="text-white/30 hover:text-white/60 transition-colors disabled:opacity-50"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Asset selector */}
-        <div className="flex gap-2 mb-4">
-          {(["xlm", "usdc"] as const).map((a) => (
-            <button
-              key={a}
-              onClick={() => setAsset(a)}
-              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
-                asset === a
-                  ? "bg-white/10 text-white border border-white/15"
-                  : "text-white/30 hover:text-white/50 border border-white/[0.05]"
-              }`}
-            >
-              {a.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        {step === "input" ? (
+          <div>
+            {/* Asset selector */}
+            <div className="flex gap-2 mb-4">
+              {(["xlm", "usdc"] as const).map((a) => (
+                <button
+                  type="button"
+                  key={a}
+                  onClick={() => {
+                    setAsset(a);
+                    setError("");
+                  }}
+                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
+                    asset === a
+                      ? "bg-white/10 text-white border border-white/15"
+                      : "text-white/30 hover:text-white/50 border border-white/[0.05]"
+                  }`}
+                >
+                  {a.toUpperCase()}
+                </button>
+              ))}
+            </div>
 
-        {/* Quick amounts */}
-        <div className="flex gap-2 mb-3">
-          {[25, 50, 75, 100].map((pct) => (
-            <button
-              key={pct}
-              onClick={() => {
-                if (balance) {
-                  const max = asset === "xlm" ? Math.max(0, balance.xlm - 2.5) : balance.usdc;
-                  setAmount(((pct / 100) * max).toFixed(4));
-                }
+            {/* Quick amounts */}
+            <div className="flex gap-2 mb-3">
+              {[25, 50, 75, 100].map((pct) => (
+                <button
+                  type="button"
+                  key={pct}
+                  onClick={() => {
+                    if (balance) {
+                      const max = asset === "xlm" ? Math.max(0, balance.xlm - 2.5) : balance.usdc;
+                      setAmount(((pct / 100) * max).toFixed(4));
+                      setError("");
+                    }
+                  }}
+                  className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-white/[0.04] text-white/50 hover:bg-white/[0.08] hover:text-white/80 transition-colors border border-white/[0.04]"
+                >
+                  {pct === 100 ? "Max" : `${pct}%`}
+                </button>
+              ))}
+            </div>
+
+            <input
+              type="number"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => {
+                setAmount(e.target.value);
+                setError("");
               }}
-              className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-white/[0.04] text-white/50 hover:bg-white/[0.08] hover:text-white/80 transition-colors border border-white/[0.04]"
+              className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder-white/20 text-sm focus:outline-none focus:border-white/20 mb-3"
+            />
+
+            {error && (
+              <p className="text-red-400 text-xs mb-3 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+              </p>
+            )}
+
+            <p className="text-xs text-white/30 mb-4">
+              Funds will be sent to your connected wallet. A minimum reserve of 2.5 XLM must remain in the vault.
+            </p>
+
+            <button
+              type="button"
+              onClick={handleProceedToConfirm}
+              className="w-full py-2.5 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors flex items-center justify-center gap-2"
             >
-              {pct === 100 ? "Max" : `${pct}%`}
+              Continue
+              <ArrowRight className="w-4 h-4" />
             </button>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div>
+            {/* Step 2: Confirmation Notice */}
+            <div className="p-3.5 rounded-xl bg-amber-500/[0.08] border border-amber-500/20 mb-4">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                <div className="text-xs text-amber-200/90 leading-relaxed">
+                  Send <span className="font-semibold text-white">{parseFloat(amount).toFixed(4)} {asset.toUpperCase()}</span> to{" "}
+                  <span className="font-mono font-semibold text-white">
+                    {destKey ? `${destKey.slice(0, 6)}...${destKey.slice(-4)}` : "your wallet"}
+                  </span>?
+                  <p className="mt-1 text-amber-400/80 font-medium">This cannot be undone.</p>
+                </div>
+              </div>
+            </div>
 
-        <input
-          type="number"
-          placeholder="0.00"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder-white/20 text-sm focus:outline-none focus:border-white/20 mb-3"
-        />
+            {/* Summary Details */}
+            <div className="space-y-2.5 p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-4 text-xs">
+              <div className="flex justify-between items-center text-white/50">
+                <span>Amount</span>
+                <span className="text-white font-medium text-sm">
+                  {parseFloat(amount).toFixed(4)} {asset.toUpperCase()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-white/50">
+                <span>From</span>
+                <span className="text-white font-medium">{VAULT_META[vaultType].label}</span>
+              </div>
+              <div className="flex justify-between items-center text-white/50">
+                <span>Destination</span>
+                <div className="flex items-center gap-1.5 text-white font-mono">
+                  <span>{destKey ? `${destKey.slice(0, 6)}...${destKey.slice(-4)}` : "Connected wallet"}</span>
+                  {destKey && (
+                    <button
+                      type="button"
+                      onClick={copyDestKey}
+                      className="text-white/30 hover:text-white transition-colors"
+                      title="Copy address"
+                    >
+                      {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-between items-center text-white/50">
+                <span>Network</span>
+                <span className="text-blue-400 font-medium">Stellar Testnet</span>
+              </div>
+            </div>
 
-        {error && (
-          <p className="text-red-400 text-xs mb-3 flex items-center gap-1.5">
-            <AlertCircle className="w-3.5 h-3.5" /> {error}
-          </p>
+            {error && (
+              <p className="text-red-400 text-xs mb-3 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+              </p>
+            )}
+
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="flex-1 py-2.5 rounded-xl border border-white/10 hover:bg-white/[0.06] text-white/70 text-xs font-semibold transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleWithdraw}
+                disabled={loading}
+                className="flex-1 py-2.5 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
+                {loading ? "Processing…" : "Confirm Withdrawal"}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setStep("input")}
+              disabled={loading}
+              className="w-full text-center text-xs text-white/35 hover:text-white/70 transition-colors mt-3 disabled:opacity-50"
+            >
+              ← Back to edit amount
+            </button>
+          </div>
         )}
-
-        <p className="text-xs text-white/30 mb-4">
-          Funds will be sent to your connected wallet. A minimum reserve of 2.5 XLM must remain in the vault.
-        </p>
-
-        <button
-          onClick={handleWithdraw}
-          disabled={loading}
-          className="w-full py-2.5 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowDownLeft className="w-4 h-4" />}
-          {loading ? "Processing…" : "Withdraw"}
-        </button>
       </motion.div>
     </motion.div>
   );
@@ -216,9 +379,11 @@ function WithdrawModal({
 
 function VaultCard({
   vault,
+  userPublicKey,
   onRefresh,
 }: {
   vault: VaultData;
+  userPublicKey?: string;
   onRefresh: () => void;
 }) {
   const meta = VAULT_META[vault.type];
@@ -349,6 +514,7 @@ function VaultCard({
           <WithdrawModal
             vaultType={vault.type}
             balance={balance}
+            userPublicKey={userPublicKey}
             onClose={() => setShowWithdraw(false)}
             onSuccess={onRefresh}
           />
@@ -500,13 +666,13 @@ export default function VaultPage() {
           ) : (
             <div className="grid sm:grid-cols-2 gap-4">
               {savingsVault ? (
-                <VaultCard vault={savingsVault} onRefresh={fetchVaults} />
+                <VaultCard vault={savingsVault} userPublicKey={publicKey} onRefresh={fetchVaults} />
               ) : (
                 <CreateVaultCard type="savings" onCreate={fetchVaults} />
               )}
 
               {investVault ? (
-                <VaultCard vault={investVault} onRefresh={fetchVaults} />
+                <VaultCard vault={investVault} userPublicKey={publicKey} onRefresh={fetchVaults} />
               ) : (
                 <CreateVaultCard type="investment" onCreate={fetchVaults} />
               )}

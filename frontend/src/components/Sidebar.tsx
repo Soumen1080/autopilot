@@ -13,6 +13,9 @@ import {
   LogOut,
   Copy,
   Check,
+  AlertTriangle,
+  Loader2,
+  X,
 } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -31,6 +34,8 @@ export default function Sidebar({ publicKey }: { publicKey: string }) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [error, setError] = useState("");
 
   const truncated = `${publicKey.slice(0, 6)}...${publicKey.slice(-4)}`;
 
@@ -42,8 +47,15 @@ export default function Sidebar({ publicKey }: { publicKey: string }) {
 
   const handleDisconnect = async () => {
     setDisconnecting(true);
-    await fetch("/api/account/disconnect", { method: "POST" });
-    router.push("/onboarding");
+    setError("");
+    try {
+      const res = await fetch("/api/account/disconnect", { method: "POST" });
+      if (!res.ok) throw new Error("Failed to disconnect wallet. Please try again.");
+      router.push("/onboarding");
+    } catch (err: any) {
+      setError(err?.message || "Failed to disconnect wallet. Please try again.");
+      setDisconnecting(false);
+    }
   };
 
   return (
@@ -134,7 +146,11 @@ export default function Sidebar({ publicKey }: { publicKey: string }) {
           </div>
 
           <button
-            onClick={handleDisconnect}
+            type="button"
+            onClick={() => {
+              setError("");
+              setShowConfirmModal(true);
+            }}
             disabled={disconnecting}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-white/30 hover:text-red-400 hover:bg-red-500/[0.08] transition-all duration-150 disabled:opacity-50"
           >
@@ -143,6 +159,93 @@ export default function Sidebar({ publicKey }: { publicKey: string }) {
           </button>
         </div>
       </aside>
+
+      {/* ── Disconnect Confirmation Dialog ── */}
+      <AnimatePresence>
+        {showConfirmModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => !disconnecting && setShowConfirmModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#0d0d0d] border border-white/[0.08] rounded-2xl p-6 w-full max-w-sm shadow-2xl relative"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                  <LogOut className="w-5 h-5 text-red-400" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => !disconnecting && setShowConfirmModal(false)}
+                  disabled={disconnecting}
+                  className="text-white/30 hover:text-white/60 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <h3 className="text-base font-semibold text-white mb-1.5">
+                Disconnect Wallet?
+              </h3>
+              <p className="text-xs text-white/50 leading-relaxed mb-4">
+                This will clear your active session and pause rule executions. Your automation rules and history will be safely preserved.
+              </p>
+
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-4">
+                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 shrink-0 flex items-center justify-center text-[9px] font-bold text-white">
+                  {publicKey.slice(0, 2).toUpperCase()}
+                </div>
+                <span className="text-xs font-mono text-white/70 truncate flex-1">
+                  {publicKey}
+                </span>
+              </div>
+
+              {error && (
+                <div className="mb-4 text-xs text-red-400 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  disabled={disconnecting}
+                  className="flex-1 py-2.5 rounded-xl border border-white/10 hover:bg-white/[0.06] text-white/70 text-xs font-semibold transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDisconnect}
+                  disabled={disconnecting}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  {disconnecting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Disconnecting…
+                    </>
+                  ) : (
+                    <>
+                      <LogOut className="w-3.5 h-3.5" />
+                      Yes, disconnect
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Mobile Bottom Nav ── */}
       <nav className="fixed bottom-0 left-0 right-0 h-16 bg-black/80 backdrop-blur-xl border-t border-white/[0.06] flex md:hidden z-30">
